@@ -99,8 +99,14 @@ jobs:
           nm -g "$LIB" 2>/dev/null | grep -E "SDL_AppInit|SDL_AppIterate|SDL_AppEvent|SDL_AppQuit" | head -10
           mkdir -p "$GITHUB_WORKSPACE/engine-artifacts"
           cp "$LIB" "$GITHUB_WORKSPACE/engine-artifacts/"
-          if [ -d vcpkg_installed ]; then
-            tar -czf "$GITHUB_WORKSPACE/engine-artifacts/vcpkg-sim.tar.gz" -C . vcpkg_installed
+          # vcpkg manifest 模式会把依赖装进 CMake 构建目录，不一定是源码根目录
+          VCPKG_DIR=$(find . -maxdepth 4 -type d -name vcpkg_installed | head -1)
+          echo "VCPKG_DIR=${VCPKG_DIR:-未找到}"
+          if [ -n "$VCPKG_DIR" ]; then
+            tar -czf "$GITHUB_WORKSPACE/engine-artifacts/vcpkg-sim.tar.gz"                 -C "$(dirname "$VCPKG_DIR")" "$(basename "$VCPKG_DIR")"
+          else
+            echo "::error::找不到 vcpkg_installed，App 链接会缺依赖"
+            exit 1
           fi
           ls -lh "$GITHUB_WORKSPACE/engine-artifacts"
 
