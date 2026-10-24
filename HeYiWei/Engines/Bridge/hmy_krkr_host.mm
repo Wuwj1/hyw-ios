@@ -33,6 +33,8 @@
 
 // SDL_SetMainReady 声明在 SDL3/SDL_main.h 里；这里只补声明，避免引入 SDL_main.h 的 main 宏
 extern "C" void SDL_SetMainReady(void);
+// SDL_system.h: 安装/卸载 iOS 生命周期观察（前后台、内存警告、状态栏方向）
+extern "C" void SDL_SetiOSEventPump(bool enabled);
 
 #include <sys/stat.h>
 #include <unistd.h>
@@ -181,6 +183,9 @@ void hmy_finish(SDL_AppResult result, const char *message) {
     [g_link invalidate];
     g_link = nil;
 
+    // MAC-2：先卸载生命周期观察，再让引擎收尾（顺序与 SDL 自己的实现一致）
+    SDL_SetiOSEventPump(false);
+
     if (g_appstate != nullptr) {
         SDL_AppQuit(g_appstate, result);   // sdl3_app.cpp:561
         g_appstate = nullptr;
@@ -302,6 +307,10 @@ extern "C" int hmy_krkr_run(const char *game_dir, hmy_krkr_finished_cb cb) {
         hmy_finish(rc, "引擎初始化失败（看 savedata 里的日志）");
         return -5;
     }
+
+    // MAC-2：SDL 只在自己的 SDLUIKitDelegate 里调 SDL_SetiOSEventPump(true)，
+    // 我们没接管 UIApplication，所以必须自己开一次，否则前后台/内存警告观察器不会安装。
+    SDL_SetiOSEventPump(true);
 
     if (!hmy_attach_sdl_window(g_presenter)) {
         // 拿到窗口但挂不上：这是 TODO(MAC-3) 的典型症状
