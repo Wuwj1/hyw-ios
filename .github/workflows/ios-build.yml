@@ -1,7 +1,7 @@
 name: iOS Build (Simulator, unsigned)
 
-# 第一阶段：只验证「何意味 iOS App 本体」能否编译。
-# 不签名 / 不装真机 / 不编 KRKR/ONS 引擎 / 不生成 IPA。
+# MAC-1：把 hmy_krkr_host.mm 接回 App 目标，和真实的 krkrsdl3 静态库一起链接。
+# 仍然是 Simulator + 无签名，不生成 IPA、不做真机。
 
 on:
   workflow_dispatch:
@@ -20,32 +20,47 @@ permissions:
   contents: read
 
 jobs:
+  # 先编引擎（vcpkg 有缓存，第二次起较快）
+  engine:
+    uses: ./.github/workflows/krkr-engine.yml
+
   build:
-    name: Build HeYiWei (Simulator, no signing)
+    name: Build HeYiWei (Simulator, engine linked)
+    needs: engine
     runs-on: macos-15
-    timeout-minutes: 40
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ---------------------------------------------------------------
-      # 环境记录：出现 API / Swift 版本问题时用来对齐环境
-      # ---------------------------------------------------------------
       - name: Toolchain versions
         run: |
           {
             echo "## Toolchain"
             echo '```'
             sw_vers
-            echo
             xcodebuild -version
-            echo
             echo -n "iphonesimulator SDK: "; xcrun --sdk iphonesimulator --show-sdk-version
-            echo
             swift --version
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Download engine artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: krkrsdl3-simulator
+          path: engine-dl
+
+      - name: Prepare engine tree
+        run: |
+          set -e
+          mkdir -p engine
+          cp engine-dl/libkrkrsdl3.a engine/
+          tar -xzf engine-dl/vcpkg-sim.tar.gz -C engine
+          echo "--- 静态库 ---"; ls -lh engine/libkrkrsdl3.a
+          echo "--- vcpkg 目录 ---"; ls engine/vcpkg_installed
+          echo "--- 静态库数量 ---"; ls engine/vcpkg_installed/arm64-ios-simulator/lib/*.a | wc -l
 
       - name: Install XcodeGen
         run: |
@@ -55,42 +70,29 @@ jobs:
       - name: Generate Xcode project
         run: |
           xcodegen generate
-          echo "--- 工程 target / scheme ---"
           xcodebuild -list -project HeYiWei.xcodeproj
 
-      # ---------------------------------------------------------------
-      # 硬性检查：KRKR ObjC++ host 不允许进入 Compile Sources
-      # ---------------------------------------------------------------
-      - name: Verify KRKR host is not compiled
+      # 现在 host 必须真的进 Compile Sources（和上一阶段相反）
+      - name: Verify host is compiled
         run: |
           set -e
           PBX=HeYiWei.xcodeproj/project.pbxproj
-          if grep -q "hmy_krkr_host" "$PBX"; then
-            echo "::error::hmy_krkr_host.mm 出现在 project.pbxproj 中，第一轮不允许编译它"
-            grep -n "hmy_krkr_host" "$PBX"
+          if ! grep -q "hmy_krkr_host" "$PBX"; then
+            echo "::error::hmy_krkr_host.mm 不在工程里，MAC-1 没生效"
             exit 1
           fi
-          echo "OK: project.pbxproj 中没有 hmy_krkr_host"
-          # 额外确认 Compile Sources 里没有它
-          python3 - <<'PY'
-          import re, sys
-          s = open("HeYiWei.xcodeproj/project.pbxproj", encoding="utf-8", errors="replace").read()
-          blocks = re.findall(r"isa = PBXSourcesBuildPhase;.*?\};", s, re.S)
-          joined = "\n".join(blocks)
-          if "hmy_krkr_host" in joined:
-              print("::error::hmy_krkr_host 出现在 Compile Sources")
-              sys.exit(1)
-          print(f"OK: {len(blocks)} 个 Compile Sources 阶段均不含 KRKR host")
-          PY
+          echo "OK: hmy_krkr_host.mm 已进入工程"
 
-      # ---------------------------------------------------------------
-      # 无签名编译。故意让这一步「不失败」：先保住日志，
-      # 由最后一步根据真实状态码把 job 标红。
-      # ---------------------------------------------------------------
-      - name: Build (Simulator, unsigned)
+      - name: Build (Simulator, unsigned, engine linked)
         id: build
         run: |
           set +o pipefail
+          VCPKG="$PWD/engine/vcpkg_installed/arm64-ios-simulator"
+          LIBS="-Wl,-force_load,$PWD/engine/libkrkrsdl3.a"
+          for a in "$VCPKG"/lib/*.a; do
+            LIBS="$LIBS -l$(basename "$a" .a | sed 's/^lib//')"
+          done
+          LIBS="$LIBS -framework UIKit -framework AVFoundation -framework AudioToolbox -framework CoreGraphics -framework QuartzCore -framework GameController -framework Metal -framework OpenGLES -framework CoreMotion -framework CoreVideo"
           xcodebuild \
             -project HeYiWei.xcodeproj \
             -scheme HeYiWei \
@@ -100,10 +102,12 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
+            HEADER_SEARCH_PATHS="$VCPKG/include $VCPKG/include/freetype2 $PWD/HeYiWei/Engines/Bridge" \
+            LIBRARY_SEARCH_PATHS="$PWD/engine $VCPKG/lib" \
+            OTHER_LDFLAGS="$LIBS" \
             build 2>&1 | tee build.log
           status=${PIPESTATUS[0]}
           echo "xcodebuild 退出码: $status"
-          echo "xcodebuild_status=$status" >> "$GITHUB_OUTPUT"
           echo "XCODEBUILD_STATUS=$status" >> "$GITHUB_ENV"
           echo "=== 前 40 条 error ==="
           grep -n "error:" build.log | head -40 || echo "(没有 error: 行)"
@@ -115,12 +119,9 @@ jobs:
           {
             echo "## Build result"
             echo '```'
+            echo "xcodebuild status: ${XCODEBUILD_STATUS:-unknown}"
             if [ -f build.log ]; then
-              echo "xcodebuild status: ${XCODEBUILD_STATUS:-unknown}"
-              echo
               grep -n "error:" build.log | head -40 || echo "(no error: lines)"
-            else
-              echo "build.log 不存在"
             fi
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
@@ -145,9 +146,8 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      # 最后才决定 job 成败，保证日志和能产出的 artifact 都先上传
       - name: Fail job if xcodebuild failed
         if: env.XCODEBUILD_STATUS != '0'
         run: |
-          echo "::error::xcodebuild 失败（状态码 ${XCODEBUILD_STATUS}），请看 ios-build-log artifact 里的 build.log"
+          echo "::error::xcodebuild 失败（状态码 ${XCODEBUILD_STATUS}）"
           exit 1

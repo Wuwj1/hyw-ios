@@ -47,10 +47,10 @@
 // 这里用 C++ 链接声明；宿主编译时**必须把 sdl3_entry.cpp 排除**，
 // 否则会和它自带的 main() 冲突（上游注释：iOS 要套壳就别加那个文件）。
 // ---------------------------------------------------------------------------
-extern "C++" SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]);
-extern "C++" SDL_AppResult SDL_AppIterate(void *appstate);
-extern "C++" SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event);
-extern "C++" void SDL_AppQuit(void *appstate, SDL_AppResult result);
+extern "C" SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]);
+extern "C" SDL_AppResult SDL_AppIterate(void *appstate);
+extern "C" SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event);
+extern "C" void SDL_AppQuit(void *appstate, SDL_AppResult result);
 
 // ---------------------------------------------------------------------------
 // 状态：整个生命周期都在主线程，除 g_running / g_quitRequested 用原子量

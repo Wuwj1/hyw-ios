@@ -5,6 +5,7 @@ name: KRKR Engine (iOS Simulator static lib)
 
 on:
   workflow_dispatch:
+  workflow_call:
 
 jobs:
   engine:

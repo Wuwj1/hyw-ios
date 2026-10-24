@@ -21,8 +21,6 @@ targets:
         # 第一轮只编 SwiftUI 本体：KRKR 宿主是 ObjC++，依赖 SDL3 与 krkrsdl3 的 arm64 产物，
         # 现在没有这些东西，参与编译只会报一堆找不到头文件/符号的错。
         excludes:
-          # 第一轮不编译 KRKR 宿主（依赖 SDL3 / krkrsdl3 的 arm64 产物）
-          - "Engines/Bridge/hmy_krkr_host.mm"
           # Info.plist 已由 INFOPLIST_FILE 使用，不能再作为资源拷贝一次
           - "Resources/Info.plist"
     settings:
@@ -36,6 +34,10 @@ targets:
         SWIFT_OBJC_BRIDGING_HEADER: HeYiWei/Resources/HeYiWei-Bridging-Header.h
         HEADER_SEARCH_PATHS:
           - $(SRCROOT)/HeYiWei/Engines/Bridge
+          - $(SRCROOT)/engine/vcpkg_installed/arm64-ios-simulator/include
+        LIBRARY_SEARCH_PATHS:
+          - $(SRCROOT)/engine
+          - $(SRCROOT)/engine/vcpkg_installed/arm64-ios-simulator/lib
         CLANG_ENABLE_MODULES: YES
 
 # 接回 KRKR 宿主时（第 4 步），在 HeYiWei target 上：
