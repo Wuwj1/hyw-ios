@@ -63,7 +63,9 @@ jobs:
       - name: Bootstrap vcpkg
         run: |
           set -e
-          git clone --depth 1 https://github.com/microsoft/vcpkg.git "$VCPKG_ROOT"
+          # 必须完整克隆：vcpkg 要根据 vcpkg.json 的 builtin-baseline 检查 historical commit，
+          # 浅克隆会导致 "failed to git show versions/baseline.json"
+          git clone https://github.com/microsoft/vcpkg.git "$VCPKG_ROOT"
           "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
           "$VCPKG_ROOT/vcpkg" version
 
