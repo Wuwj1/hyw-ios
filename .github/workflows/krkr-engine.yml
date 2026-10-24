@@ -56,10 +56,12 @@ jobs:
           # 2) 静态库不需要 bundle 属性，避免 Xcode 生成器告警
           sed -i '' 's/MACOSX_BUNDLE TRUE/MACOSX_BUNDLE FALSE/' cmake/cmake_main.txt
           # 3) 排除自带 main() 的入口文件（宿主自己驱动回调，不需要它）
-          sed -i '' '/sdl3_entry.cpp/d' cmake/cmake_environ.txt
+          #    注意：上游清单里是变量写法 ${KRKRSDL_SDL_NAME}_entry.cpp，
+          #    按字面量 "sdl3_entry.cpp" 匹配是删不掉的（曾导致 duplicate symbol '_main'）
+          sed -i '' '/KRKRSDL_SDL_NAME}_entry.cpp/d' cmake/cmake_environ.txt
           echo "--- 校验补丁 ---"
-          grep -n "add_library(${PROJECT_NAME} STATIC" cmake/cmake_main.txt | head -2
-          grep -c "sdl3_entry" cmake/cmake_environ.txt || true
+          grep -n "add_library(${PROJECT_NAME} STATIC" cmake/cmake_main.txt | head -2 || true
+          echo "剩余 _entry.cpp 行: $(grep -c "_entry.cpp" cmake/cmake_environ.txt || true)"
 
       - name: Bootstrap vcpkg
         run: |
@@ -97,6 +99,13 @@ jobs:
           ls -lh "$LIB"
           echo "--- 是否含 SDL_AppInit / SDL_AppIterate ---"
           nm -g "$LIB" 2>/dev/null | grep -E "SDL_AppInit|SDL_AppIterate|SDL_AppEvent|SDL_AppQuit" | head -10
+          echo "--- 是否残留 main（必须为空）---"
+          if nm -g "$LIB" 2>/dev/null | grep -qE " T _main$"; then
+            echo "::error::静态库里包含 main()，会与 App 的 main 冲突"
+            nm -g "$LIB" | grep -E " T _main$"
+            exit 1
+          fi
+          echo "OK: 无 main 符号"
           mkdir -p "$GITHUB_WORKSPACE/engine-artifacts"
           cp "$LIB" "$GITHUB_WORKSPACE/engine-artifacts/"
           # 上游把 tests/bpg 编成独立静态库 krkr_bpg 再链主目标；改成 STATIC 后必须单独带上
