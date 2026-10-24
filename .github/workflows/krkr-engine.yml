@@ -1,0 +1,109 @@
+name: KRKR Engine (iOS Simulator static lib)
+
+# MAC-1 前置：把 krkrsdl3 编成 iOS Simulator 的静态库，
+# 供 App 目标链接 hmy_krkr_host.mm。上游 commit 固定，不跟随 main。
+
+on:
+  workflow_dispatch:
+
+jobs:
+  engine:
+    name: Build krkrsdl3 (Simulator, static)
+    runs-on: macos-15
+    timeout-minutes: 300
+
+    env:
+      KRKRSDL3_COMMIT: dd1de3d2fd6a10c4f5ef8801e6649f520fc5bc3e
+      KRKRSDL3_BUILD_COMMIT: 6059f7857bf6c56bad33a781ec0fc2cc5151b86a
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+
+    steps:
+      - name: Checkout (our repo)
+        uses: actions/checkout@v4
+
+      - name: Toolchain versions
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcrun --sdk iphonesimulator --show-sdk-version
+
+      - name: Install build tools
+        run: |
+          brew install cmake ninja pkg-config || true
+          cmake --version | head -1
+          ninja --version
+
+      - name: Fetch pinned upstream sources
+        run: |
+          set -e
+          git clone https://github.com/krkrsdl3/krkrsdl3_build.git upstream
+          cd upstream
+          git checkout "$KRKRSDL3_BUILD_COMMIT"
+          git submodule update --init --recursive
+          cd cpp
+          git fetch --depth 50 origin "$KRKRSDL3_COMMIT" || true
+          git checkout "$KRKRSDL3_COMMIT"
+          echo "core commit: $(git rev-parse HEAD)"
+
+      # 上游 iOS 目标是 .app 可执行文件；这里改成静态库，供 App 链接
+      - name: Patch target type to STATIC lib
+        run: |
+          set -e
+          cd upstream
+          # 1) 可执行 → 静态库
+          sed -i '' 's/add_executable(${PROJECT_NAME} MACOSX_BUNDLE ${KRKRSDL_SRC})/add_library(${PROJECT_NAME} STATIC ${KRKRSDL_SRC})/' cmake/cmake_main.txt
+          # 2) 静态库不需要 bundle 属性，避免 Xcode 生成器告警
+          sed -i '' 's/MACOSX_BUNDLE TRUE/MACOSX_BUNDLE FALSE/' cmake/cmake_main.txt
+          # 3) 排除自带 main() 的入口文件（宿主自己驱动回调，不需要它）
+          sed -i '' '/sdl3_entry.cpp/d' cmake/cmake_environ.txt
+          echo "--- 校验补丁 ---"
+          grep -n "add_library(${PROJECT_NAME} STATIC" cmake/cmake_main.txt | head -2
+          grep -c "sdl3_entry" cmake/cmake_environ.txt || true
+
+      - name: Bootstrap vcpkg
+        run: |
+          set -e
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git "$VCPKG_ROOT"
+          "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+          "$VCPKG_ROOT/vcpkg" version
+
+      - name: Cache vcpkg installed tree
+        uses: actions/cache@v4
+        with:
+          path: upstream/vcpkg_installed
+          key: vcpkg-${{ runner.os }}-sim-${{ env.KRKRSDL3_BUILD_COMMIT }}-${{ env.KRKRSDL3_COMMIT }}
+
+      - name: Configure (iOS Simulator)
+        run: |
+          set -e
+          cd upstream
+          cmake --preset "iOS Simulator Config" -DUSE_RENDER_VK=OFF
+
+      - name: Build static lib
+        run: |
+          set -e
+          cd upstream
+          cmake --build --preset "iOS Simulator Debug Build" --parallel 3
+
+      - name: Locate and verify artifacts
+        run: |
+          set -e
+          cd upstream
+          LIB=$(find . -name "libkrkrsdl3.a" | head -1)
+          echo "LIB=$LIB"
+          ls -lh "$LIB"
+          echo "--- 是否含 SDL_AppInit / SDL_AppIterate ---"
+          nm -g "$LIB" 2>/dev/null | grep -E "SDL_AppInit|SDL_AppIterate|SDL_AppEvent|SDL_AppQuit" | head -10
+          mkdir -p "$GITHUB_WORKSPACE/engine-artifacts"
+          cp "$LIB" "$GITHUB_WORKSPACE/engine-artifacts/"
+          if [ -d vcpkg_installed ]; then
+            tar -czf "$GITHUB_WORKSPACE/engine-artifacts/vcpkg-sim.tar.gz" -C . vcpkg_installed
+          fi
+          ls -lh "$GITHUB_WORKSPACE/engine-artifacts"
+
+      - name: Upload engine artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: krkrsdl3-simulator
+          path: engine-artifacts/
+          retention-days: 7
