@@ -89,6 +89,9 @@ jobs:
           set +o pipefail
           VCPKG="$PWD/engine/vcpkg_installed/arm64-ios-simulator"
           LIBS="-Wl,-force_load,$PWD/engine/libkrkrsdl3.a"
+          if [ -f "$PWD/engine/libkrkr_bpg.a" ]; then
+            LIBS="$LIBS -Wl,-force_load,$PWD/engine/libkrkr_bpg.a"
+          fi
           for a in "$VCPKG"/lib/*.a; do
             LIBS="$LIBS -l$(basename "$a" .a | sed 's/^lib//')"
           done
