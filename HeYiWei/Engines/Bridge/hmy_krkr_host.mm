@@ -31,6 +31,9 @@
 
 #include <SDL3/SDL.h>
 
+// SDL_SetMainReady 声明在 SDL3/SDL_main.h 里；这里只补声明，避免引入 SDL_main.h 的 main 宏
+extern "C" void SDL_SetMainReady(void);
+
 #include <sys/stat.h>
 #include <unistd.h>
 #include <atomic>
@@ -39,7 +42,10 @@
 
 #include "hmy_krkr.h"
 
-@class HMYKrkrLinkProxy;   // CADisplayLink 的回调目标（文件末尾实现）
+@interface HMYKrkrLinkProxy : NSObject
++ (instancetype)shared;
+- (void)onFrame:(CADisplayLink *)link;
+@end
 
 // ---------------------------------------------------------------------------
 // krkrsdl3 的四个回调。
@@ -318,11 +324,6 @@ extern "C" int hmy_krkr_run(const char *game_dir, hmy_krkr_finished_cb cb) {
 // ---------------------------------------------------------------------------
 // CADisplayLink 需要一个 ObjC 目标对象来回调 C++ 函数
 // ---------------------------------------------------------------------------
-@interface HMYKrkrLinkProxy : NSObject
-+ (instancetype)shared;
-- (void)onFrame:(CADisplayLink *)link;
-@end
-
 @implementation HMYKrkrLinkProxy
 + (instancetype)shared {
     static HMYKrkrLinkProxy *proxy = nil;
