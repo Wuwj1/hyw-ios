@@ -1,0 +1,93 @@
+workflows:
+  ios-simulator:
+    name: iOS Simulator (unsigned)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+
+    environment:
+      xcode: latest
+      vars:
+        XCODE_PROJECT: "HeYiWei.xcodeproj"
+        XCODE_SCHEME: "HeYiWei"
+        SIM_DESTINATION: "generic/platform=iOS Simulator"
+
+    # 推送到 main 自动构建；也可以在 Codemagic 页面手动 Start new build
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+          source: true
+
+    cache:
+      cache_paths:
+        - $HOME/Library/Caches/Homebrew
+
+    scripts:
+      - name: Toolchain versions
+        script: |
+          set -e
+          echo "=== macOS ==="
+          sw_vers
+          echo "=== Xcode ==="
+          xcodebuild -version
+          echo "=== iphonesimulator SDK ==="
+          xcrun --sdk iphonesimulator --show-sdk-version
+          echo "=== Swift ==="
+          swift --version
+
+      - name: Install XcodeGen
+        script: |
+          set -e
+          brew install xcodegen || brew upgrade xcodegen
+          xcodegen --version
+
+      - name: Generate Xcode project
+        script: |
+          set -e
+          xcodegen generate
+          echo "--- 工程内容 ---"
+          xcodebuild -list -project "$XCODE_PROJECT"
+
+      # 第一轮不允许 KRKR ObjC++ host 参与编译
+      - name: Verify KRKR host is excluded
+        script: |
+          set -e
+          if grep -q "hmy_krkr_host" "$XCODE_PROJECT/project.pbxproj"; then
+            echo "ERROR: hmy_krkr_host.mm 被加入了 target，第一轮不应该编译它"
+            grep -n "hmy_krkr_host" "$XCODE_PROJECT/project.pbxproj"
+            exit 1
+          fi
+          echo "OK: hmy_krkr_host.mm 未进入工程"
+
+      # 无签名编译到 iOS Simulator（不需要 Apple Developer 账号）
+      - name: Build (Simulator, unsigned)
+        script: |
+          set -o pipefail
+          xcodebuild \
+            -project "$XCODE_PROJECT" \
+            -scheme "$XCODE_SCHEME" \
+            -configuration Debug \
+            -destination "$SIM_DESTINATION" \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee build.log
+
+      # 失败时把第一批 error 单独打出来，方便定位根错误
+      - name: Summarize first errors
+        script: |
+          set +e
+          echo "=== 前 40 条 error ==="
+          grep -n "error:" build.log | head -40
+          echo
+          echo "=== 编译产物 ==="
+          find build/Build/Products -name "*.app" -maxdepth 3 2>/dev/null
+          exit 0
+
+    artifacts:
+      - build.log
+      - build/Build/Products/Debug-iphonesimulator/*.app
+      - build/Build/Products/Debug-iphonesimulator/*.app.dSYM
