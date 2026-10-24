@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+
+# Xcode 生成物（CI 里由 xcodegen 重新生成）
+HeYiWei.xcodeproj/
+build/
+DerivedData/
+*.xcuserdatad/
+xcuserdata/
+
+# 调研用的上游源码摘录，不进仓库
+_research/
+
+# 杂项
+*.log

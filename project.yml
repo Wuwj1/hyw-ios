@@ -1,0 +1,47 @@
+name: HeYiWei
+options:
+  bundleIdPrefix: com.krkr
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    DEVELOPMENT_LANGUAGE: zh-Hans
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    SWIFT_STRICT_CONCURRENCY: minimal
+
+targets:
+  HeYiWei:
+    type: application
+    platform: iOS
+    sources:
+      - path: HeYiWei
+        # 第一轮只编 SwiftUI 本体：KRKR 宿主是 ObjC++，依赖 SDL3 与 krkrsdl3 的 arm64 产物，
+        # 现在没有这些东西，参与编译只会报一堆找不到头文件/符号的错。
+        excludes:
+          # 第一轮不编译 KRKR 宿主（依赖 SDL3 / krkrsdl3 的 arm64 产物）
+          - "Engines/Bridge/hmy_krkr_host.mm"
+          # Info.plist 已由 INFOPLIST_FILE 使用，不能再作为资源拷贝一次
+          - "Resources/Info.plist"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.krkr.hmy.ios
+        INFOPLIST_FILE: HeYiWei/Resources/Info.plist
+        MARKETING_VERSION: "3.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_OBJC_BRIDGING_HEADER: HeYiWei/Resources/HeYiWei-Bridging-Header.h
+        HEADER_SEARCH_PATHS:
+          - $(SRCROOT)/HeYiWei/Engines/Bridge
+        CLANG_ENABLE_MODULES: YES
+
+# 接回 KRKR 宿主时（第 4 步），在 HeYiWei target 上：
+#   1. 删掉上面 sources.excludes 里的 "Engines/Bridge/hmy_krkr_host.mm"
+#   2. settings.base 追加：
+#        OTHER_LDFLAGS: ["-lkrkrsdl3", "-lSDL3"]
+#        HEADER_SEARCH_PATHS: 追加 krkrsdl3 / SDL3 / vcpkg arm64-ios 的 include 目录
+#        OTHER_CPLUSPLUSFLAGS: ["-D_KRKRSDL3_IOS=1", "-D_KRKRSDL3_GLES=1", "-D_KRKRSDL3_USE_SDL3=1"]
+#   3. 构建里必须排除上游的 environ/sdl3/sdl3_entry.cpp（它自带 main）
