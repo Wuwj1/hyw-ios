@@ -57,8 +57,16 @@ jobs:
           set -e
           mkdir -p engine
           cp engine-dl/libkrkrsdl3.a engine/
+          # BPG 解码库是独立静态库，必须一起带上，否则链接缺 bpg_decoder_*
+          if [ -f engine-dl/libkrkr_bpg.a ]; then
+            cp engine-dl/libkrkr_bpg.a engine/
+          else
+            echo "::error::artifact 里没有 libkrkr_bpg.a"
+            ls -la engine-dl
+            exit 1
+          fi
           tar -xzf engine-dl/vcpkg-sim.tar.gz -C engine
-          echo "--- 静态库 ---"; ls -lh engine/libkrkrsdl3.a
+          echo "--- 静态库 ---"; ls -lh engine/*.a
           echo "--- vcpkg 目录 ---"; ls engine/vcpkg_installed
           echo "--- 静态库数量 ---"; ls engine/vcpkg_installed/arm64-ios-simulator/lib/*.a | wc -l
 
