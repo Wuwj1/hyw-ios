@@ -92,7 +92,7 @@ jobs:
           for a in "$VCPKG"/lib/*.a; do
             LIBS="$LIBS -l$(basename "$a" .a | sed 's/^lib//')"
           done
-          LIBS="$LIBS -framework UIKit -framework AVFoundation -framework AudioToolbox -framework CoreGraphics -framework QuartzCore -framework GameController -framework Metal -framework OpenGLES -framework CoreMotion -framework CoreVideo -framework CoreBluetooth -framework CoreHaptics"
+          LIBS="$LIBS -framework UIKit -framework AVFoundation -framework AudioToolbox -framework CoreGraphics -framework QuartzCore -framework GameController -framework Metal -framework OpenGLES -framework CoreMotion -framework CoreVideo -framework CoreBluetooth -framework CoreHaptics -framework CoreMedia -framework VideoToolbox"
           xcodebuild \
             -project HeYiWei.xcodeproj \
             -scheme HeYiWei \
