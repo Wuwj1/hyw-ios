@@ -1,0 +1,153 @@
+name: iOS Build (Simulator, unsigned)
+
+# 第一阶段：只验证「何意味 iOS App 本体」能否编译。
+# 不签名 / 不装真机 / 不编 KRKR/ONS 引擎 / 不生成 IPA。
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - "HeYiWei/**"
+      - "project.yml"
+      - ".github/workflows/ios-build.yml"
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build HeYiWei (Simulator, no signing)
+    runs-on: macos-15
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ---------------------------------------------------------------
+      # 环境记录：出现 API / Swift 版本问题时用来对齐环境
+      # ---------------------------------------------------------------
+      - name: Toolchain versions
+        run: |
+          {
+            echo "## Toolchain"
+            echo '```'
+            sw_vers
+            echo
+            xcodebuild -version
+            echo
+            echo -n "iphonesimulator SDK: "; xcrun --sdk iphonesimulator --show-sdk-version
+            echo
+            swift --version
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Install XcodeGen
+        run: |
+          brew install xcodegen || brew upgrade xcodegen
+          xcodegen --version
+
+      - name: Generate Xcode project
+        run: |
+          xcodegen generate
+          echo "--- 工程 target / scheme ---"
+          xcodebuild -list -project HeYiWei.xcodeproj
+
+      # ---------------------------------------------------------------
+      # 硬性检查：KRKR ObjC++ host 不允许进入 Compile Sources
+      # ---------------------------------------------------------------
+      - name: Verify KRKR host is not compiled
+        run: |
+          set -e
+          PBX=HeYiWei.xcodeproj/project.pbxproj
+          if grep -q "hmy_krkr_host" "$PBX"; then
+            echo "::error::hmy_krkr_host.mm 出现在 project.pbxproj 中，第一轮不允许编译它"
+            grep -n "hmy_krkr_host" "$PBX"
+            exit 1
+          fi
+          echo "OK: project.pbxproj 中没有 hmy_krkr_host"
+          # 额外确认 Compile Sources 里没有它
+          python3 - <<'PY'
+          import re, sys
+          s = open("HeYiWei.xcodeproj/project.pbxproj", encoding="utf-8", errors="replace").read()
+          blocks = re.findall(r"isa = PBXSourcesBuildPhase;.*?\};", s, re.S)
+          joined = "\n".join(blocks)
+          if "hmy_krkr_host" in joined:
+              print("::error::hmy_krkr_host 出现在 Compile Sources")
+              sys.exit(1)
+          print(f"OK: {len(blocks)} 个 Compile Sources 阶段均不含 KRKR host")
+          PY
+
+      # ---------------------------------------------------------------
+      # 无签名编译。故意让这一步「不失败」：先保住日志，
+      # 由最后一步根据真实状态码把 job 标红。
+      # ---------------------------------------------------------------
+      - name: Build (Simulator, unsigned)
+        id: build
+        run: |
+          set +o pipefail
+          xcodebuild \
+            -project HeYiWei.xcodeproj \
+            -scheme HeYiWei \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee build.log
+          status=${PIPESTATUS[0]}
+          echo "xcodebuild 退出码: $status"
+          echo "xcodebuild_status=$status" >> "$GITHUB_OUTPUT"
+          echo "XCODEBUILD_STATUS=$status" >> "$GITHUB_ENV"
+          echo "=== 前 40 条 error ==="
+          grep -n "error:" build.log | head -40 || echo "(没有 error: 行)"
+          exit 0
+
+      - name: Summarize for job summary
+        if: always()
+        run: |
+          {
+            echo "## Build result"
+            echo '```'
+            if [ -f build.log ]; then
+              echo "xcodebuild status: ${XCODEBUILD_STATUS:-unknown}"
+              echo
+              grep -n "error:" build.log | head -40 || echo "(no error: lines)"
+            else
+              echo "build.log 不存在"
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-log
+          path: build.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload simulator .app
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HeYiWei-simulator-app
+          path: |
+            build/Build/Products/Debug-iphonesimulator/*.app
+            build/Build/Products/Debug-iphonesimulator/*.app.dSYM
+          if-no-files-found: warn
+          retention-days: 14
+
+      # 最后才决定 job 成败，保证日志和能产出的 artifact 都先上传
+      - name: Fail job if xcodebuild failed
+        if: env.XCODEBUILD_STATUS != '0'
+        run: |
+          echo "::error::xcodebuild 失败（状态码 ${XCODEBUILD_STATUS}），请看 ios-build-log artifact 里的 build.log"
+          exit 1
