@@ -92,7 +92,7 @@ jobs:
           for a in "$VCPKG"/lib/*.a; do
             LIBS="$LIBS -l$(basename "$a" .a | sed 's/^lib//')"
           done
-          LIBS="$LIBS -framework UIKit -framework AVFoundation -framework AudioToolbox -framework CoreGraphics -framework QuartzCore -framework GameController -framework Metal -framework OpenGLES -framework CoreMotion -framework CoreVideo"
+          LIBS="$LIBS -framework UIKit -framework AVFoundation -framework AudioToolbox -framework CoreGraphics -framework QuartzCore -framework GameController -framework Metal -framework OpenGLES -framework CoreMotion -framework CoreVideo -framework CoreBluetooth -framework CoreHaptics"
           xcodebuild \
             -project HeYiWei.xcodeproj \
             -scheme HeYiWei \
@@ -102,6 +102,8 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
             HEADER_SEARCH_PATHS="$VCPKG/include $VCPKG/include/freetype2 $PWD/HeYiWei/Engines/Bridge" \
             LIBRARY_SEARCH_PATHS="$PWD/engine $VCPKG/lib" \
             OTHER_LDFLAGS="$LIBS" \
